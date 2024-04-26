@@ -1,0 +1,24 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\idiom\OneDrive\Documents\Repos\Crypto Neural Network\cpp\src\nn.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="C:\Users\idiom\OneDrive\Documents\Repos\Crypto Neural Network\cpp\src\nn.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\idiom\OneDrive\Documents\Repos\Crypto Neural Network\cpp\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{857F221F-0199-3AEE-8FC4-E91215A1F715}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{FF7B9E89-F6AE-38AE-94FE-2598F914A060}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

@@ -89,6 +89,15 @@ def influxdb_setup():
         print(f'Bucket "{bucket}" created.')
     return bucket_name, org, client
 
+#Get time to initially start collection of historical data
+def get_since(exchange, symbol, period, now, client, bucket_name, org):
+    oldest_timestamp = get_oldest_timestamp(symbol, period, client, bucket_name, org)
+    if oldest_timestamp is not None:
+        since = get_time_ago(oldest_timestamp, exchange, period)
+    else:
+        since = get_time_ago(now, exchange, period)
+    return since
+
 #Update the timestamps if new data is outside the timeframe
 def update_setup(most_recent_timestamp, now, exchange, period):
     if most_recent_timestamp < (now - get_td(period)).replace(tzinfo=timezone.utc):
@@ -212,13 +221,9 @@ async def fetch_data_for_symbol(exchange, symbol):
     periods = ['1m', '5m']   
     try:
         for period in periods:
-            
+                        
             #Get historical all historical data        
-            oldest_timestamp = get_oldest_timestamp(symbol, period, client, bucket_name, org)
-            if oldest_timestamp is not None:
-                since = get_time_ago(oldest_timestamp, exchange, period)
-            else:
-                since = get_time_ago(now, exchange, period)          
+            since = get_since(exchange, symbol, period, now, client, bucket_name, org)          
             await fetch_ohlcv(exchange, symbol, since, period, client, bucket_name, org)
             
             #If new data is outside timeframe update database

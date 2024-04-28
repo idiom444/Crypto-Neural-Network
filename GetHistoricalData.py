@@ -98,13 +98,6 @@ def get_since(exchange, symbol, period, now, client, bucket_name, org):
         since = get_time_ago(now, exchange, period)
     return since
 
-#Update the timestamps if new data is outside the timeframe
-def update_setup(most_recent_timestamp, now, exchange, period):
-    if most_recent_timestamp < (now - get_td(period)).replace(tzinfo=timezone.utc):
-        most_recent_timestamp = exchange.parse8601((most_recent_timestamp + get_add_td(period)).replace(tzinfo=timezone.utc).isoformat())
-    now_timestamp = (now.replace(tzinfo=timezone.utc).timestamp() * 1000)
-    return most_recent_timestamp, now_timestamp
-
 #Fetch all historical data until there is no more
 async def fetch_ohlcv(exchange, symbol, since, periodicity, client, bucket, org):
     
@@ -218,7 +211,7 @@ async def fetch_data_for_symbol(exchange, symbol):
     now = datetime.now()   
         
     #Periodicities to fetch 
-    periods = ['1m', '5m']   
+    periods = ['1m', '5m', '15m']   
     try:
         for period in periods:
                         
@@ -228,11 +221,12 @@ async def fetch_data_for_symbol(exchange, symbol):
             
             #If new data is outside timeframe update database
             most_recent_timestamp = get_most_recent_timestamp(symbol, period, client, bucket_name, org)
-            if most_recent_timestamp is not None:       
-                most_recent_timestamp, now_timestamp = update_setup(most_recent_timestamp, now, exchange, period)
-                await fetch_ohlcv_until_now(exchange, symbol, most_recent_timestamp, period, now_timestamp, client, bucket_name, org)
-                    
-            print('Data for ' + symbol + ' ' + period + 'is up to date.')
+            if most_recent_timestamp is not None:                
+                if most_recent_timestamp < (now - get_td(period)).replace(tzinfo=timezone.utc):
+                    most_recent_timestamp = exchange.parse8601((most_recent_timestamp + get_add_td(period)).replace(tzinfo=timezone.utc).isoformat())
+                    now_timestamp = (now.replace(tzinfo=timezone.utc).timestamp() * 1000)
+                    await fetch_ohlcv_until_now(exchange, symbol, most_recent_timestamp, period, now_timestamp, client, bucket_name, org)                    
+            print('Data for ' + symbol + ' ' + period + ' is up to date.')
     except ccxt.BadSymbol:
         print(f"Could not fetch data for {symbol}. Moving on to next symbol.")
     except Exception as e:
@@ -269,7 +263,7 @@ async def main():
     await saveMarketsToFile(exchange)
            
     #Init data collection   
-    await getAllSymbolsHistory()
+    await getAllSymbolsHistory(exchange)
 
 #Run main function
 asyncio.run(main())

@@ -1,13 +1,9 @@
 import ccxt.async_support as ccxt
-import asyncio
-from influxdb_client import InfluxDBClient, Point, WritePrecision, BucketsApi
+from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
-import json
 from datetime import datetime, timedelta, timezone
-import time
-import os
-import math
-from ccxt.base.errors import RequestTimeout
+from ccxt.base.errors import RequestTimeout, RateLimitExceeded, BadSymbol
+import asyncio, json, time, os, math
 
 #Save all swap market symbols to file
 async def saveMarketsToFile(exchange):
@@ -22,13 +18,19 @@ def get_td(periodicity):
     if periodicity.endswith('m'):
         multiplier = int(periodicity[:-1])
         td = timedelta(minutes=2000 * multiplier)
+    elif periodicity.endswith('h'):
+        multiplier = int(periodicity[:-1])
+        td = timedelta(hours=2000 * multiplier)
+    elif periodicity.endswith('d'):
+        multiplier = int(periodicity[:-1])
+        td = timedelta(days=2000 * multiplier)
+    elif periodicity.endswith('w'):
+        multiplier = int(periodicity[:-1])
+        td = timedelta(weeks=2000 * multiplier)       
     return td
 
-#Get the timedelta for initial setup of new data dertermined by the periodicity
-def get_add_td(periodicity):
-    if periodicity.endswith('m'):
-        multiplier = int(periodicity[:-1])
-        td = timedelta(minutes=multiplier)
+def get_update_td():   
+    td = timedelta(days=1)
     return td
 
 #Get the time ago determined by periodicity
@@ -77,10 +79,11 @@ def get_most_recent_timestamp(symbol, periodicity, client, bucket, org):
 
 #Set up InfluxDB connection and bucket if it doesn't exist
 def influxdb_setup():
-    bucket_name = "PHEMEX Contract HD"
+    bucket_name = os.environ.get("INFLUXDB_BUCKET")
     token = os.environ.get("INFLUXDB_TOKEN")
-    org = "CryptoNN"       
-    client = InfluxDBClient(url="http://localhost:8086", token=token)       
+    org = os.environ.get("INFLUXDB_ORG") 
+    url = os.environ.get("INFLUXDB_URL")      
+    client = InfluxDBClient(url=url, token=token)       
     buckets_api = client.buckets_api()    
     buckets = buckets_api.find_buckets().buckets
     bucket_exists = any(b.name == bucket_name for b in buckets)
@@ -98,25 +101,37 @@ def get_since(exchange, symbol, period, now, client, bucket_name, org):
         since = get_time_ago(now, exchange, period)
     return since
 
+#Get the divisor for tracking number of loads. Also used to calculate limit of data for the exchange to send
+def get_load_count_divisor(periodicity):
+    if periodicity.endswith('m'):
+        return 2000
+    if periodicity.endswith('h'):
+        return 2000
+    if periodicity.endswith('d'):
+        return 2000
+    if periodicity.endswith('w'):
+        return 2000      
+
 #Fetch all historical data until there is no more
 async def fetch_ohlcv(exchange, symbol, since, periodicity, client, bucket, org):
     
     #How many loads have already been stored
+    limit = get_load_count_divisor(periodicity)
     point_count = get_point_count(symbol, periodicity, client, bucket, org)
-    i = math.ceil(point_count / 2000)
+    i = math.ceil(point_count / limit)
     if i != 0:
         print('starting collection of ' + symbol + ' ' + periodicity + ' data from load ' + str(i) + ' onwards.')
     if i == 0:        
         print('starting collection of ' + symbol + ' ' + periodicity + ' data')        
     while True:
-        try:
+        try:          
             
             #Load tracker            
             if i != 0:
                 print(symbol + ' ' + periodicity + ' load ' + str(i))
                 
             #Fetch data
-            ohlcv_data = await exchange.fetch_ohlcv(symbol, periodicity, since, limit=2000)
+            ohlcv_data = await exchange.fetch_ohlcv(symbol, periodicity, since, limit=limit)
             
             #If no data is returned we are done
             if len(ohlcv_data) == 0:
@@ -139,7 +154,7 @@ async def fetch_ohlcv(exchange, symbol, since, periodicity, client, bucket, org)
             #Update load tracker           
             point_count = get_point_count(symbol, periodicity, client, bucket, org)
             i = math.ceil(point_count / 2000)
-        except ccxt.RateLimitExceeded:
+        except RateLimitExceeded:
             print(f"Rate limit exceeded for {symbol}. Waiting for 10 seconds before retrying.")
             await time.sleep(10)
             continue       
@@ -192,7 +207,7 @@ async def fetch_ohlcv_until_now(exchange, symbol, starttime, periodicity, now, c
             print(f"Timeout error for {symbol}. Waiting for 10 seconds before retrying.")
             await time.sleep(10)
             continue
-        except ccxt.RateLimitExceeded:
+        except RateLimitExceeded:
             print(f"Rate limit exceeded for {symbol}. Waiting for 10 seconds before retrying.")
             time.sleep(10)
             continue
@@ -211,7 +226,7 @@ async def fetch_data_for_symbol(exchange, symbol):
     now = datetime.now()   
         
     #Periodicities to fetch 
-    periods = ['1m', '5m', '15m']   
+    periods = ['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w']   
     try:
         for period in periods:
                         
@@ -222,12 +237,12 @@ async def fetch_data_for_symbol(exchange, symbol):
             #If new data is outside timeframe update database
             most_recent_timestamp = get_most_recent_timestamp(symbol, period, client, bucket_name, org)
             if most_recent_timestamp is not None:                
-                if most_recent_timestamp < (now - get_td(period)).replace(tzinfo=timezone.utc):
-                    most_recent_timestamp = exchange.parse8601((most_recent_timestamp + get_add_td(period)).replace(tzinfo=timezone.utc).isoformat())
+                if most_recent_timestamp < (now - get_update_td()).replace(tzinfo=timezone.utc):
+                    most_recent_timestamp = exchange.parse8601((most_recent_timestamp).replace(tzinfo=timezone.utc).isoformat())
                     now_timestamp = (now.replace(tzinfo=timezone.utc).timestamp() * 1000)
                     await fetch_ohlcv_until_now(exchange, symbol, most_recent_timestamp, period, now_timestamp, client, bucket_name, org)                    
             print('Data for ' + symbol + ' ' + period + ' is up to date.')
-    except ccxt.BadSymbol:
+    except BadSymbol:
         print(f"Could not fetch data for {symbol}. Moving on to next symbol.")
     except Exception as e:
             print(f"An error occurred: {e}")
